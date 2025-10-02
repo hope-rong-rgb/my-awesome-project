@@ -1,19 +1,23 @@
-import { fileURLToPath, URL } from 'node:url'
+import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import vueDevTools from 'vite-plugin-vue-devtools'
-import { defineConfig, loadEnv } from 'vite'
-// https://vite.dev/config/
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '')
-  return {
-    plugins: [vue(), vueDevTools()],
-    resolve: {
-      alias: {
-        '@': fileURLToPath(new URL('./src', import.meta.url)),
+import { resolve } from 'path'
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [vue()],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, './src'),
+    },
+  },
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
       },
     },
-    defind: {
-      __APP_ENV__: JSON.stringify(env.APP_ENV),
-    },
-  }
+  },
+  // 添加明确的根路径配置
+  root: '.',
+  base: '/',
 })
