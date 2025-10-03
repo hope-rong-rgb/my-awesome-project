@@ -20,6 +20,7 @@ export default defineConfig({
     exclude: ['@vicons/ionicons5', 'markdown-it']
   },
   build: {
+    outDir:'dist',
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
@@ -41,6 +42,6 @@ export default defineConfig({
     minify: 'esbuild',
     cssCodeSplit: true,
   },
-  base: './', 
-  publicDir: 'public',
+  root: '.',
+  base: './',
 })
