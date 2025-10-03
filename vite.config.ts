@@ -42,6 +42,7 @@ export default defineConfig({
     minify: 'esbuild',
     cssCodeSplit: true,
   },
-  root: '.',
-  base: './',
+  // root: '.',
+  base: '/',
+  publicDir:'public'
 })
