@@ -16,7 +16,6 @@ export default defineConfig({
       'pinia',
       'vue-router',
       'axios'
-      // 注意：不包含 @vicons/ionicons5 和 markdown-it，让它们动态加载
     ],
     exclude: ['@vicons/ionicons5', 'markdown-it']
   },
@@ -44,5 +43,5 @@ export default defineConfig({
     cssCodeSplit: true,
   },
   root: '.',
-  base: '/',
+  base: './',
 })
