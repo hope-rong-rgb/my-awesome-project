@@ -26,7 +26,6 @@ export default defineConfig({
       },
       output: {
         manualChunks: {
-          // 更细粒度的代码分割
           'markdown': ['markdown-it'],
           'icons': ['@vicons/ionicons5'],
           'naive-ui': ['naive-ui'],
@@ -42,7 +41,6 @@ export default defineConfig({
     minify: 'esbuild',
     cssCodeSplit: true,
   },
-  // root: '.',
-  base: '/',
-  publicDir:'public'
+  base: './',  // 确保是相对路径
+  publicDir: 'public',
 })
