@@ -41,6 +41,6 @@ export default defineConfig({
     minify: 'esbuild',
     cssCodeSplit: true,
   },
-  base: './',  // 确保是相对路径
+  base: './', 
   publicDir: 'public',
 })
