@@ -42,6 +42,14 @@ export default defineConfig({
     minify: 'esbuild',
     cssCodeSplit: true,
   },
+  server: {
+  hmr: {
+    overlay: false
+  }
+},
+preview: {
+  port: 8080
+},
   root: '.',
   base: './',
 })
