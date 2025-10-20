@@ -19,9 +19,7 @@
           <n-h2 class="sidebar-title">对话列表</n-h2>
           <n-button type="primary" @click="handleCreateNew" class="new-chat-btn" strong secondary>
             <template #icon>
-              <n-icon>
-                <AddIcon />
-              </n-icon>
+              <n-icon><AddIcon /></n-icon>
             </template>
             新建对话
           </n-button>
@@ -29,12 +27,11 @@
         <!-- 收起按钮 -->
         <n-button quaternary circle size="small" class="collapse-btn" @click="collapsed = true">
           <template #icon>
-            <n-icon>
-              <ArrowIcon />
-            </n-icon>
+            <n-icon><ArrowIcon /></n-icon>
           </template>
         </n-button>
       </div>
+
       <!-- 对话列表 -->
       <div class="session-list-container">
         <n-scrollbar>
@@ -58,9 +55,7 @@
                 <!-- 会话内容 -->
                 <div class="session-content" @click="handleSwitchSession(session.id)">
                   <div class="session-icon">
-                    <n-icon size="16">
-                      <ChatboxOutlineIcon />
-                    </n-icon>
+                    <n-icon size="16"><ChatboxOutlineIcon /></n-icon>
                   </div>
                   <div class="session-info">
                     <div class="session-header">
@@ -85,45 +80,26 @@
                     </div>
                   </div>
                 </div>
+
                 <!-- 操作菜单 -->
                 <div class="session-menu">
                   <!-- 省略号菜单按钮 -->
-                  <n-button
+                  <n-dropdown
                     v-if="editingSessionId !== session.id"
-                    quaternary
-                    circle
-                    size="tiny"
-                    class="menu-toggle"
-                    @click.stop="toggleMenu(session.id, $event)"
+                    trigger="click"
+                    placement="bottom-end"
+                    :options="menuOptions"
+                    @select="(key: string) => handleMenuSelect(key, session)"
                   >
-                    <template #icon>
-                      <n-icon size="16">
-                        <EllipsisHorizontalIcon />
-                      </n-icon>
-                    </template>
-                  </n-button>
-                  <!-- 菜单下拉框 -->
-                  <div
-                    v-if="activeMenuId === session.id"
-                    class="menu-dropdown"
-                    :data-menu-id="session.id"
-                  >
-                    <div class="menu-item" @click.stop="handleStartEdit(session)">
-                      <n-icon size="14">
-                        <EditIcon />
-                      </n-icon>
-                      <span>重命名</span>
-                    </div>
-                    <div class="menu-divider"></div>
-                    <div class="menu-item delete" @click.stop="handleDeleteSession(session.id)">
-                      <n-icon size="14">
-                        <TrashIcon />
-                      </n-icon>
-                      <span>删除</span>
-                    </div>
-                  </div>
+                    <n-button quaternary circle size="tiny" class="menu-toggle">
+                      <template #icon>
+                        <n-icon size="16"><EllipsisHorizontalIcon /></n-icon>
+                      </template>
+                    </n-button>
+                  </n-dropdown>
+
                   <!-- 编辑状态按钮 -->
-                  <div v-else-if="editingSessionId === session.id" class="edit-buttons">
+                  <div v-else class="edit-buttons">
                     <n-button
                       quaternary
                       circle
@@ -152,21 +128,21 @@
               </div>
             </template>
           </div>
+
           <!-- 空状态 -->
           <n-empty v-else class="empty-state" description="暂无对话">
             <template #icon>
-              <n-icon size="60" :depth="2">
-                <ChatboxOutlineIcon />
-              </n-icon>
+              <n-icon size="60" :depth="2"><ChatboxOutlineIcon /></n-icon>
             </template>
             <template #extra>
-              <n-button size="small" type="primary" @click="handleCreateNew"> 开启新对话 </n-button>
+              <n-button size="small" type="primary" @click="handleCreateNew">开启新对话</n-button>
             </template>
           </n-empty>
         </n-scrollbar>
       </div>
     </div>
-    <!-- 收起状态（已修复v-else报错） -->
+
+    <!-- 收起状态 -->
     <div v-else class="sidebar-collapsed">
       <div class="collapsed-content">
         <!-- 顶部按钮区域 -->
@@ -175,9 +151,7 @@
             <template #trigger>
               <n-button circle type="primary" class="collapsed-new-chat" @click="handleCreateNew">
                 <template #icon>
-                  <n-icon>
-                    <AddIcon />
-                  </n-icon>
+                  <n-icon><AddIcon /></n-icon>
                 </template>
               </n-button>
             </template>
@@ -187,20 +161,18 @@
             <template #trigger>
               <n-button circle quaternary class="expand-btn" @click="collapsed = false">
                 <template #icon>
-                  <n-icon>
-                    <MenuIcon />
-                  </n-icon>
+                  <n-icon><MenuIcon /></n-icon>
                 </template>
               </n-button>
             </template>
             展开边栏
           </n-tooltip>
         </div>
-        <!-- 最近对话列表（补充v-if/v-else和v-for） -->
+
+        <!-- 最近对话列表 -->
         <div class="collapsed-sessions">
           <n-scrollbar>
             <div class="collapsed-session-list">
-              <!-- 有会话时：循环渲染会话图标 -->
               <div v-if="sessions.length > 0">
                 <div
                   v-for="session in sessions"
@@ -217,7 +189,6 @@
                   </n-tooltip>
                 </div>
               </div>
-              <!-- 无会话时：显示空状态（v-else与v-if相邻，修复报错） -->
               <div v-else class="collapsed-empty">
                 <n-tooltip placement="right" trigger="hover">
                   <template #trigger>
@@ -248,12 +219,14 @@ import {
   MenuOutline as MenuIcon,
 } from '@vicons/ionicons5'
 import { storeToRefs } from 'pinia'
-import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { ref, computed, h } from 'vue'
+import { NIcon } from 'naive-ui'
 
 interface Session {
   id: string
   title: string
   createdAt: number
+  messages?: unknown[]
 }
 
 interface GroupedSession {
@@ -271,10 +244,26 @@ const collapsed = ref(false)
 const editingSessionId = ref<string | null>(null)
 const editTitle = ref('')
 const originalTitle = ref('')
-// 菜单相关状态
-const activeMenuId = ref<string | null>(null)
 
-// 计算属性：按时间分组
+// 菜单选项
+const menuOptions = computed(() => [
+  {
+    label: '重命名',
+    key: 'rename',
+    icon: () => h(NIcon, null, { default: () => h(EditIcon) }),
+  },
+  {
+    type: 'divider',
+    key: 'd1',
+  },
+  {
+    label: '删除',
+    key: 'delete',
+    icon: () => h(NIcon, null, { default: () => h(TrashIcon) }),
+  },
+])
+
+// 计算属性:按时间分组
 const groupedSessions = computed(() => {
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -288,7 +277,6 @@ const groupedSessions = computed(() => {
     { type: 'older', title: '更早', sessions: [] },
   ]
 
-  // 对会话按创建时间倒序排序
   const sortedSessions = [...sessions.value].sort((a, b) => b.createdAt - a.createdAt)
 
   sortedSessions.forEach((session) => {
@@ -296,20 +284,16 @@ const groupedSessions = computed(() => {
     const sessionDay = new Date(
       sessionDate.getFullYear(),
       sessionDate.getMonth(),
-      sessionDate.getDate(),
+      sessionDate.getDate()
     )
 
     if (sessionDay.getTime() === today.getTime()) {
-      // 今天
       groups[0].sessions.push(session)
     } else if (sessionDate.getTime() >= sevenDaysAgo.getTime()) {
-      // 7天内（不包括今天）
       groups[1].sessions.push(session)
     } else if (sessionDate.getTime() >= thirtyDaysAgo.getTime()) {
-      // 30天内（不包括7天内）
       groups[2].sessions.push(session)
     } else {
-      // 超过30天
       groups[3].sessions.push(session)
     }
   })
@@ -324,7 +308,7 @@ const truncateTitle = (title: string): string => {
   return title.substring(0, 14) + '...'
 }
 
-// 格式化显示时间（用于对话项内显示）
+// 格式化显示时间
 const formatDisplayTime = (timestamp: number): string => {
   const date = new Date(timestamp)
   const now = new Date()
@@ -332,13 +316,11 @@ const formatDisplayTime = (timestamp: number): string => {
   const sessionDay = new Date(date.getFullYear(), date.getMonth(), date.getDate())
 
   if (sessionDay.getTime() === today.getTime()) {
-    // 今天：显示时间
     return date.toLocaleTimeString('zh-CN', {
       hour: '2-digit',
       minute: '2-digit',
     })
   } else {
-    // 非今天：显示月日
     return date.toLocaleDateString('zh-CN', {
       month: '2-digit',
       day: '2-digit',
@@ -351,15 +333,23 @@ const handleCollapse = (value: boolean) => {
   collapsed.value = value
 }
 
+// 创建新对话
 const handleCreateNew = () => {
   chatStore.createNewSession()
-  closeMenu()
 }
 
 const handleSwitchSession = (sessionId: string) => {
   if (editingSessionId.value) return
   chatStore.switchSession(sessionId)
-  closeMenu()
+}
+
+// 菜单选择处理
+const handleMenuSelect = (key: string, session: Session) => {
+  if (key === 'rename') {
+    handleStartEdit(session)
+  } else if (key === 'delete') {
+    handleDeleteSession(session.id)
+  }
 }
 
 const handleDeleteSession = (sessionId: string) => {
@@ -367,7 +357,6 @@ const handleDeleteSession = (sessionId: string) => {
     handleCancelEdit()
   }
   chatStore.deleteSession(sessionId)
-  closeMenu()
 }
 
 // 开始编辑
@@ -375,13 +364,13 @@ const handleStartEdit = (session: Session) => {
   editingSessionId.value = session.id
   editTitle.value = session.title
   originalTitle.value = session.title
-  closeMenu()
 }
 
 // 保存编辑
 const handleSaveEdit = () => {
   if (editingSessionId.value && editTitle.value.trim()) {
     chatStore.renameSession(editingSessionId.value, editTitle.value.trim())
+    window.$message?.success('重命名成功')
   }
   editingSessionId.value = null
   editTitle.value = ''
@@ -394,89 +383,6 @@ const handleCancelEdit = () => {
   editTitle.value = ''
   originalTitle.value = ''
 }
-
-// 切换菜单显示/隐藏
-const toggleMenu = (sessionId: string, event: MouseEvent) => {
-  if (activeMenuId.value === sessionId) {
-    activeMenuId.value = null
-  } else {
-    activeMenuId.value = sessionId
-    // 下次 DOM 更新后计算位置
-    nextTick(() => {
-      positionMenu(event)
-    })
-  }
-}
-
-// 计算菜单位置
-const positionMenu = (event: MouseEvent) => {
-  if (!activeMenuId.value) return
-
-  const menu = document.querySelector(
-    `.menu-dropdown[data-menu-id="${activeMenuId.value}"]`,
-  ) as HTMLElement
-  if (!menu) return
-
-  const button = event.currentTarget as HTMLElement
-  const buttonRect = button.getBoundingClientRect()
-  const viewportHeight = window.innerHeight
-
-  // 菜单尺寸
-  const menuWidth = 120
-  const menuHeight = 112 // 两个菜单项 + 分割线的高度
-
-  // 计算水平位置 - 右侧对齐按钮
-  let left = buttonRect.right - menuWidth
-  // 确保不超出左边界
-  if (left < 8) left = 8
-
-  // 计算垂直位置 - 智能判断上下位置
-  const spaceBelow = viewportHeight - buttonRect.bottom
-  const spaceAbove = buttonRect.top
-
-  let top: number
-
-  if (spaceBelow < menuHeight && spaceAbove > menuHeight) {
-    // 下方空间不足，但上方空间足够 - 显示在上方
-    top = buttonRect.top - menuHeight - 4
-  } else {
-    // 显示在下方
-    top = buttonRect.bottom + 4
-  }
-
-  // 确保不超出视口边界
-  if (top < 8) top = 8
-  if (top + menuHeight > viewportHeight - 8) {
-    top = viewportHeight - menuHeight - 8
-  }
-
-  // 应用位置
-  menu.style.left = `${left}px`
-  menu.style.top = `${top}px`
-}
-
-// 关闭菜单
-const closeMenu = () => {
-  activeMenuId.value = null
-}
-
-// 点击外部关闭菜单
-const handleClickOutside = (event: MouseEvent) => {
-  if (!activeMenuId.value) return
-  const activeMenu = document.querySelector(`.menu-dropdown[data-menu-id="${activeMenuId.value}"]`)
-  if (activeMenu && !activeMenu.contains(event.target as Node)) {
-    closeMenu()
-  }
-}
-
-// 全局点击事件监听
-onMounted(() => {
-  document.addEventListener('click', handleClickOutside)
-})
-
-onUnmounted(() => {
-  document.removeEventListener('click', handleClickOutside)
-})
 </script>
 
 <style scoped lang="scss">
@@ -531,8 +437,6 @@ onUnmounted(() => {
 
     &:hover {
       background: #0d8c6d;
-      transform: none;
-      box-shadow: none;
     }
   }
 
@@ -646,10 +550,6 @@ onUnmounted(() => {
 
   .edit-input {
     width: 100%;
-
-    :deep(.n-input) {
-      border-radius: 4px;
-    }
   }
 }
 
@@ -676,9 +576,7 @@ onUnmounted(() => {
 }
 
 // 菜单样式
-// 菜单样式
 .session-menu {
-  position: relative;
   display: flex;
   align-items: center;
   flex-shrink: 0;
@@ -692,52 +590,8 @@ onUnmounted(() => {
   height: 24px;
 
   &:hover {
-    opacity: 1;
-    visibility: visible;
     background: #e1e5e9;
   }
-}
-
-.menu-dropdown {
-  position: fixed; /* 改为 fixed 定位 */
-  background: #fff;
-  border: 1px solid #e1e5e9;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  z-index: 10000; /* 提高 z-index */
-  min-width: 120px;
-  padding: 4px;
-  /* 移除之前的定位属性 */
-}
-
-.menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  font-size: 13px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  color: #1a1a1a;
-
-  &:hover {
-    background: #f0f2f5;
-  }
-
-  &.delete {
-    color: #e74c3c;
-
-    &:hover {
-      background: rgba(231, 76, 60, 0.1);
-    }
-  }
-}
-
-.menu-divider {
-  height: 1px;
-  background: #e1e5e9;
-  margin: 4px 0;
 }
 
 .edit-buttons {
@@ -745,32 +599,21 @@ onUnmounted(() => {
   gap: 4px;
 
   .action-btn {
-    transition: all 0.2s ease;
     width: 24px;
     height: 24px;
 
     &:hover {
-      transform: scale(1.05);
       background: #e1e5e9;
     }
   }
 }
+
 .empty-state {
   margin-top: 80px;
   padding: 0 20px;
-
-  :deep(.n-empty__icon) {
-    margin-bottom: 16px;
-  }
-
-  :deep(.n-empty__description) {
-    margin-bottom: 20px;
-    color: #999;
-    font-size: 14px;
-  }
 }
 
-// 收起状态样式（已补充空状态）
+// 收起状态样式
 .sidebar-collapsed {
   display: flex;
   flex-direction: column;
@@ -827,7 +670,6 @@ onUnmounted(() => {
     padding: 8px 0;
   }
 
-  // 收起状态空状态样式
   .collapsed-empty {
     display: flex;
     align-items: center;
@@ -862,95 +704,12 @@ onUnmounted(() => {
 
 // 响应式设计
 @media (max-width: 768px) {
-  .app-sidebar {
-    width: 100% !important;
-    max-width: 100%;
-    background: #fff;
-  }
-
-  .sidebar-header {
-    padding: 12px;
-
-    .sidebar-title {
-      font-size: 15px;
-    }
-  }
-
   .session-title {
     max-width: 140px;
   }
-  .menu-dropdown {
-    /* 移动端保持原有底部弹窗样式 */
-    position: fixed;
-    top: auto !important;
-    bottom: 0;
-    left: 0 !important;
-    right: 0;
-    width: 100%;
-    border-radius: 12px 12px 0 0;
-    margin-top: 0;
-    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
-    max-width: none;
-  }
-  // 移动端收起状态
-  .sidebar-collapsed {
-    padding: 12px 6px;
-  }
-
-  .collapsed-actions {
-    gap: 8px;
-
-    .collapsed-new-chat,
-    .expand-btn {
-      width: 36px;
-      height: 36px;
-    }
-  }
-
-  .collapsed-session-item,
-  .collapsed-empty {
-    width: 36px;
-    height: 36px;
-  }
 }
 
-@media (max-width: 480px) {
-  .session-list {
-    padding: 6px;
-  }
-
-  .session-item {
-    padding: 8px 10px;
-  }
-
-  .session-title {
-    max-width: 120px;
-    font-size: 13px;
-  }
-
-  .session-time {
-    font-size: 11px;
-  }
-
-  .time-group-header {
-    padding: 6px 10px 2px;
-    font-size: 11px;
-  }
-
-  .sidebar-header {
-    padding: 10px;
-
-    .sidebar-title {
-      font-size: 14px;
-    }
-
-    .new-chat-btn {
-      height: 34px;
-      font-size: 13px;
-    }
-  }
-}
-// 深色模式支持（已补充收起状态空状态）
+// 深色模式支持
 @media (prefers-color-scheme: dark) {
   .app-sidebar {
     background: #1a1a1a;
@@ -1004,46 +763,17 @@ onUnmounted(() => {
     color: #999;
   }
 
-  .menu-dropdown {
-    background: #2a2a2a;
-    border-color: #3a3a3a;
-
-    &::before {
-      background: #2a2a2a;
-      border-color: #3a3a3a;
-    }
-  }
-
-  .menu-item {
-    color: #fff;
-
-    &:hover {
-      background: #3a3a3a;
-    }
-  }
-
-  .menu-divider {
-    background: #3a3a3a;
-  }
-
-  // 收起状态深色模式
   .sidebar-collapsed {
-    .collapsed-sessions {
-      .collapsed-empty {
-        color: #666;
+    .collapsed-session-item {
+      color: #999;
+
+      &:hover {
+        background: #2f2f2f;
       }
 
-      .collapsed-session-item {
-        color: #999;
-
-        &:hover {
-          background: #2f2f2f;
-        }
-
-        &--active {
-          background: #1e3a2a !important;
-          color: #10a37f;
-        }
+      &--active {
+        background: #1e3a2a !important;
+        color: #10a37f;
       }
     }
   }

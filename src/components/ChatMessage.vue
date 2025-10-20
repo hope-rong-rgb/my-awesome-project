@@ -9,7 +9,7 @@
     <!-- 用户消息 -->
     <div v-if="message.role === 'user'" class="user-message">
       <div class="message-avatar">
-        <n-avatar round size="small" class="avatar-user"> 你 </n-avatar>
+        <n-avatar round size="small" class="avatar-user">你</n-avatar>
       </div>
       <div class="message-content-wrapper">
         <div class="message-header">
@@ -41,7 +41,7 @@
     <!-- AI消息 -->
     <div v-else class="assistant-message">
       <div class="message-avatar">
-        <n-avatar round size="small" class="avatar-assistant"> AI </n-avatar>
+        <n-avatar round size="small" class="avatar-assistant">AI</n-avatar>
       </div>
       <div class="message-content-wrapper">
         <div class="message-header">
@@ -74,10 +74,7 @@
           </div>
         </div>
         <div class="message-bubble assistant-bubble">
-          <div
-            v-if="isStreaming && message.id === currentStreamingMessageId"
-            class="streaming-content"
-          >
+          <div v-if="isStreaming" class="streaming-content">
             <span v-html="renderedContent"></span>
             <span class="typing-cursor">|</span>
           </div>
@@ -87,12 +84,7 @@
         </div>
         <div class="message-time">
           {{ formatTime(message.timestamp) }}
-          <span
-            v-if="isStreaming && message.id === currentStreamingMessageId"
-            class="streaming-indicator"
-          >
-            · 正在输入
-          </span>
+          <span v-if="isStreaming" class="streaming-indicator">· 正在输入</span>
         </div>
       </div>
     </div>
@@ -101,42 +93,29 @@
 
 <script setup lang="ts">
 import { CopyOutline as CopyIcon, RefreshOutline as RefreshIcon } from '@vicons/ionicons5'
-import { ref, onMounted, watch } from 'vue'
+import { computed, watch } from 'vue'
 import type { Message } from '@/stores/chat'
+import { renderMessageContent } from '@/utils/markdown'
 
 interface Props {
   message: Message
   isStreaming?: boolean
-  currentStreamingMessageId?: string | null
   isRegenerateDisabled?: boolean
   showRegenerateButton?: boolean
 }
 
 const props = defineProps<Props>()
-const renderedContent = ref('')
 
-// 动态加载 markdown 解析器
-const loadMarkdownRenderer = async () => {
-  try {
-    const { renderMessageContent } = await import('@/utils/markdown')
-    renderedContent.value = renderMessageContent(props.message.content)
-  } catch (error) {
-    console.error('加载 markdown 解析器失败:', error)
-    renderedContent.value = props.message.content // 降级为纯文本
-  }
-}
-
-onMounted(() => {
-  loadMarkdownRenderer()
+// 渲染后的内容
+const renderedContent = computed(() => {
+  return renderMessageContent(props.message.content)
 })
 
-// 监听内容变化，如果是流式消息则实时更新
+// 监听流式更新
 watch(
   () => props.message.content,
   () => {
-    if (props.isStreaming && props.message.id === props.currentStreamingMessageId) {
-      loadMarkdownRenderer()
-    }
+    // 流式内容会自动通过computed更新
   }
 )
 
@@ -231,14 +210,12 @@ const formatTime = (timestamp: number) => {
 }
 
 .message-bubble {
-  padding: 12px 16px;
+  padding: 16px 20px;
   border-radius: 20px;
   line-height: 1.6;
   word-wrap: break-word;
   box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  backdrop-filter: blur(10px);
-  border: 1px solid transparent;
 }
 
 .user-bubble {
@@ -270,32 +247,6 @@ const formatTime = (timestamp: number) => {
 .message-text {
   font-size: 15px;
   line-height: 1.7;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
-  letter-spacing: -0.01em;
-}
-
-.message-text :deep(p) {
-  margin: 0.75em 0;
-  color: inherit;
-}
-
-.message-text :deep(ul),
-.message-text :deep(ol) {
-  margin: 0.75em 0;
-  padding-left: 1.5em;
-}
-
-.message-text :deep(li) {
-  margin: 0.5em 0;
-  color: inherit;
-}
-
-.message-text :deep(blockquote) {
-  border-left: 4px solid #e5e7eb;
-  margin: 1em 0;
-  padding-left: 1em;
-  color: #6b7280;
-  font-style: italic;
 }
 
 .message-time {
@@ -303,7 +254,6 @@ const formatTime = (timestamp: number) => {
   color: #9ca3af;
   margin-top: 8px;
   font-weight: 400;
-  letter-spacing: 0.02em;
 }
 
 .message-actions {
@@ -311,7 +261,7 @@ const formatTime = (timestamp: number) => {
   align-items: center;
   gap: 6px;
   opacity: 0;
-  transition: all 0.3s ease;
+  transition: opacity 0.3s ease;
   margin-left: 8px;
 }
 
@@ -325,7 +275,6 @@ const formatTime = (timestamp: number) => {
   transition: all 0.3s ease;
   border-radius: 8px;
   padding: 4px 8px;
-  min-width: auto;
 }
 
 .copy-btn:hover,
@@ -333,18 +282,6 @@ const formatTime = (timestamp: number) => {
   color: #10b981;
   background: rgba(16, 185, 129, 0.1);
   transform: scale(1.05);
-}
-
-.user-message .regenerate-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
-  color: white;
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-.regenerate-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  transform: none !important;
 }
 
 .user-message .regenerate-btn {
@@ -355,8 +292,14 @@ const formatTime = (timestamp: number) => {
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
-.streaming-content {
-  display: inline;
+.user-message .regenerate-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.regenerate-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .typing-cursor {
@@ -373,29 +316,15 @@ const formatTime = (timestamp: number) => {
 }
 
 @keyframes blink {
-  0%,
-  50% {
-    opacity: 1;
-  }
-  51%,
-  100% {
-    opacity: 0;
-  }
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
 }
 
 @keyframes pulse {
-  0% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.6;
-  }
-  100% {
-    opacity: 1;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
-/* 暗色模式支持 */
 @media (prefers-color-scheme: dark) {
   .message-sender {
     color: #f1f5f9;
@@ -405,10 +334,6 @@ const formatTime = (timestamp: number) => {
     background: rgba(30, 41, 59, 0.8);
     border-color: rgba(71, 85, 105, 0.6);
     color: #f1f5f9;
-  }
-
-  .assistant-bubble:hover {
-    border-color: rgba(100, 116, 139, 0.6);
   }
 
   .message-time {

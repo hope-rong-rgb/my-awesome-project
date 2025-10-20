@@ -1,10 +1,6 @@
-/**
- * 聊天状态管理 Store
- * 负责管理聊天会话、消息、流式输出等功能
- */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { chatWithAIStream } from '@/services/api'
+import { chatWithAIStream, abortStreaming } from '@/services/api'
 
 // 消息类型定义
 export interface Message {
@@ -23,71 +19,89 @@ export interface ChatSession {
   updatedAt: number
 }
 
+// 请求状态枚举
+enum RequestState {
+  IDLE = 'idle',
+  LOADING = 'loading',
+  STREAMING = 'streaming',
+}
+
 export const useChatStore = defineStore(
   'chat',
   () => {
     // ========== 状态定义 ==========
-    const sessions = ref<ChatSession[]>([]) // 所有聊天会话
-    const currentSessionId = ref<string | null>(null) // 当前会话ID
-    const isLoading = ref(false) // 加载状态
-
-    // 流式输出相关状态
-    const streamingContent = ref('') // 流式内容
-    const isStreaming = ref(false) // 是否正在流式输出
-    const currentStreamingMessageId = ref<string | null>(null) // 当前流式消息ID
-
-    // ========== 工具函数 ==========
-    /**
-     * 生成唯一消息ID
-     */
-    const generateUniqueId = (): string => {
-      return `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-    }
-
-    /**
-     * 生成唯一会话ID
-     */
-    const generateSessionId = (): string => {
-      return `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-    }
+    const sessions = ref<ChatSession[]>([])
+    const currentSessionId = ref<string | null>(null)
+    const requestState = ref<RequestState>(RequestState.IDLE)
+    const streamingContent = ref('')
+    const currentStreamingMessageId = ref<string | null>(null)
 
     // ========== 计算属性 ==========
-    /**
-     * 当前会话
-     */
+    const isLoading = computed(() => requestState.value === RequestState.LOADING)
+    const isStreaming = computed(() => requestState.value === RequestState.STREAMING)
+
     const currentSession = computed(() => {
       return sessions.value.find((session) => session.id === currentSessionId.value)
     })
 
-    /**
-     * 当前会话的消息列表（按时间排序）
-     */
     const currentMessages = computed(() => {
       const messages = currentSession.value?.messages || []
-      return messages.sort((a, b) => a.timestamp - b.timestamp)
+      return [...messages].sort((a, b) => a.timestamp - b.timestamp)
     })
 
+    const isCurrentSessionEmpty = computed(() => {
+      const current = currentSession.value
+      return !current || !current.messages || current.messages.length === 0
+    })
+
+    // ========== 工具函数 ==========
+    const generateUniqueId = (): string => {
+      return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    }
+
+    const generateSessionId = (): string => {
+      return `session-${generateUniqueId()}`
+    }
+
+    const generateMessageId = (): string => {
+      return `msg-${generateUniqueId()}`
+    }
+
+    // 统一的状态重置函数
+    const resetRequestState = () => {
+      requestState.value = RequestState.IDLE
+      streamingContent.value = ''
+      currentStreamingMessageId.value = null
+    }
+
+    // 更新会话时间
+    const updateSessionTime = (sessionId: string) => {
+      const session = sessions.value.find((s) => s.id === sessionId)
+      if (session) {
+        session.updatedAt = Date.now()
+      }
+    }
+
     // ========== 会话管理 ==========
-    /**
-     * 初始化会话
-     */
     const initializeSessions = () => {
       if (sessions.value.length === 0) {
         createNewSession()
       } else if (!currentSessionId.value) {
         currentSessionId.value = sessions.value[0].id
       }
-      console.log('🔍 初始化会话检查:', {
+      console.log('✅ 会话初始化完成:', {
         sessionCount: sessions.value.length,
         currentSessionId: currentSessionId.value,
-        currentMessages: currentSession.value?.messages || [],
       })
     }
 
-    /**
-     * 创建新会话
-     */
     const createNewSession = (): string => {
+      // 检查当前会话是否为空
+      if (isCurrentSessionEmpty.value && sessions.value.length > 0) {
+        window.$message?.warning('当前会话为空,请先发送消息后再创建新对话')
+        return currentSessionId.value || ''
+      }
+
       const newSession: ChatSession = {
         id: generateSessionId(),
         title: '新对话',
@@ -101,119 +115,144 @@ export const useChatStore = defineStore(
       return newSession.id
     }
 
-    /**
-     * 切换会话
-     */
     const switchSession = (sessionId: string) => {
+      if (requestState.value !== RequestState.IDLE) {
+        window.$message?.warning('请等待当前消息处理完成')
+        return
+      }
       currentSessionId.value = sessionId
     }
 
-    // 发送用户消息
+    const deleteSession = (sessionId: string) => {
+      const index = sessions.value.findIndex((s) => s.id === sessionId)
+      if (index !== -1) {
+        sessions.value.splice(index, 1)
+        if (currentSessionId.value === sessionId) {
+          currentSessionId.value = sessions.value[0]?.id || null
+          if (!currentSessionId.value) {
+            createNewSession()
+          }
+        }
+        window.$message?.success('已删除对话')
+      }
+    }
 
+    const renameSession = (sessionId: string, newTitle: string) => {
+      const session = sessions.value.find((s) => s.id === sessionId)
+      if (session) {
+        session.title = newTitle.trim() || '未命名对话'
+        updateSessionTime(sessionId)
+      }
+    }
+
+    // ========== 消息处理 ==========
     const sendUserMessage = async (content: string) => {
-      // 严格的内容检查
-      if (!content || !content.trim()) {
-        console.warn('❌ 发送空消息被阻止')
+      const trimmedContent = content.trim()
+      if (!trimmedContent) {
+        console.warn('❌ 消息内容为空')
         return
       }
 
-      console.log('📤 发送用户消息:', { content: content.trim() })
+      // 防止重复请求
+      if (requestState.value !== RequestState.IDLE) {
+        console.warn('🚫 已有请求在进行中')
+        return
+      }
 
+      console.log('📤 发送用户消息:', trimmedContent)
+
+      // 确保有当前会话
       if (!currentSessionId.value || sessions.value.length === 0) {
         createNewSession()
       }
 
+      const session = currentSession.value
+      if (!session) {
+        console.error('❌ 找不到当前会话')
+        return
+      }
+
+      // 创建用户消息
       const userMessage: Message = {
-        id: generateUniqueId(),
+        id: generateMessageId(),
         role: 'user',
-        content: content.trim(),
+        content: trimmedContent,
         timestamp: Date.now(),
       }
 
-      const session = sessions.value.find((s) => s.id === currentSessionId.value)
-      if (session) {
-        session.messages.push(userMessage)
-        session.updatedAt = Date.now()
+      session.messages.push(userMessage)
+      updateSessionTime(session.id)
 
-        if (session.messages.length === 1) {
-          session.title = content.trim().slice(0, 20) + (content.length > 20 ? '...' : '')
-        }
+      // 更新会话标题(仅首条消息)
+      if (session.messages.length === 1) {
+        session.title = trimmedContent.slice(0, 20) + (trimmedContent.length > 20 ? '...' : '')
       }
 
-      await callRealAIStream()
+      // 调用AI
+      await callAIStream(session.id, trimmedContent)
     }
 
-    // 新增：从指定消息重新生成
     const regenerateFromMessage = async (messageId: string) => {
-      if (isStreaming.value || isLoading.value) return
-
-      const session = sessions.value.find((s) => s.id === currentSessionId.value)
-      if (!session) {
-        console.error('找不到当前会话')
+      if (requestState.value !== RequestState.IDLE) {
+        window.$message?.warning('请等待当前消息处理完成')
         return
       }
 
-      // 找到要重新生成的消息
-      const targetMessageIndex = session.messages.findIndex((msg) => msg.id === messageId)
-      if (targetMessageIndex === -1) {
-        console.error('找不到指定消息')
-        return
-      }
-
-      const targetMessage = session.messages[targetMessageIndex]
-
-      // 删除该消息之后的所有消息
-      session.messages = session.messages.slice(0, targetMessageIndex + 1)
-      session.updatedAt = Date.now()
-
-      // 根据消息类型决定如何重新生成
-      if (targetMessage.role === 'user') {
-        // 如果是用户消息，重新调用AI
-        await callRealAIStream()
-      } else if (targetMessage.role === 'assistant') {
-        // 如果是AI消息，找到对应的用户消息重新生成
-        const previousUserMessage = session.messages
-          .slice(0, targetMessageIndex)
-          .reverse()
-          .find((msg) => msg.role === 'user')
-
-        if (previousUserMessage) {
-          await callRealAIStream()
-        }
-      }
-    }
-
-    // 流式AI调用函数
-    // 修改 callRealAIStream 方法
-    const callRealAIStream = async () => {
-      // 添加请求锁检查，防止重复调用
-      if (isLoading.value || isStreaming.value) {
-        console.warn('🚫 已有请求在进行中，忽略重复调用')
-        return
-      }
-
-      isLoading.value = true
-      isStreaming.value = true
-      streamingContent.value = ''
-
-      const session = sessions.value.find((s) => s.id === currentSessionId.value)
+      const session = currentSession.value
       if (!session) {
         console.error('❌ 找不到当前会话')
-        // 使用统一的状态重置函数
+        return
+      }
+
+      const targetIndex = session.messages.findIndex((msg) => msg.id === messageId)
+      if (targetIndex === -1) {
+        console.error('❌ 找不到指定消息')
+        return
+      }
+
+      const targetMessage = session.messages[targetIndex]
+
+      // 删除该消息之后的所有消息
+      session.messages = session.messages.slice(0, targetIndex + 1)
+      updateSessionTime(session.id)
+
+      // 获取用户消息内容
+      let userContent = ''
+      if (targetMessage.role === 'user') {
+        userContent = targetMessage.content
+      } else if (targetMessage.role === 'assistant') {
+        // 删除当前AI消息
+        session.messages.pop()
+        // 找到上一条用户消息
+        const previousUserMessage = session.messages
+          .slice()
+          .reverse()
+          .find((msg) => msg.role === 'user')
+        if (previousUserMessage) {
+          userContent = previousUserMessage.content
+        }
+      }
+
+      if (userContent) {
+        await callAIStream(session.id, userContent)
+      }
+    }
+
+    const callAIStream = async (sessionId: string, userContent: string) => {
+      requestState.value = RequestState.LOADING
+      streamingContent.value = ''
+
+      const session = sessions.value.find((s) => s.id === sessionId)
+      if (!session) {
+        console.error('❌ 找不到会话:', sessionId)
         resetRequestState()
         return
       }
 
       try {
-        // 获取最后一条用户消息内容
-        const lastUserMessage = session.messages.filter((msg) => msg.role === 'user').pop()
-        if (!lastUserMessage) {
-          throw new Error('没有找到用户消息')
-        }
-
-        // 创建一条空的AI消息
+        // 创建AI消息
         const aiMessage: Message = {
-          id: generateUniqueId(),
+          id: generateMessageId(),
           role: 'assistant',
           content: '',
           timestamp: Date.now(),
@@ -221,142 +260,94 @@ export const useChatStore = defineStore(
 
         currentStreamingMessageId.value = aiMessage.id
         session.messages.push(aiMessage)
-        session.updatedAt = Date.now()
+        updateSessionTime(session.id)
 
-        console.log('🤖 开始 AI 调用，消息ID:', aiMessage.id)
+        console.log('🤖 开始AI调用, 消息ID:', aiMessage.id)
 
-        // 调用流式API
+        // 切换到流式状态
+        requestState.value = RequestState.STREAMING
+
         await chatWithAIStream(
-          lastUserMessage.content,
+          userContent,
           (content) => {
-            // 检查是否已被中止
-            if (!isStreaming.value) {
-              console.log('🛑 流式输出已被中止，停止接收数据')
-              return
-            }
+            // 实时更新内容
+            if (requestState.value !== RequestState.STREAMING) return
+
             streamingContent.value = content
             const messageIndex = session.messages.findIndex((msg) => msg.id === aiMessage.id)
             if (messageIndex !== -1) {
               session.messages[messageIndex].content = content
-              session.updatedAt = Date.now()
+              updateSessionTime(session.id)
             }
           },
           () => {
-            // 检查是否已被中止
-            if (!isStreaming.value) {
-              console.log('🛑 流式输出完成回调被跳过（已中止）')
-              return
-            }
-            console.log('✅ 流式输出正常完成')
-            // ✅ 修复：在完成回调中重置所有状态
+            // 完成回调
+            if (requestState.value !== RequestState.STREAMING) return
+            console.log('✅ 流式输出完成')
+            updateSessionTime(session.id)
             resetRequestState()
-            session.updatedAt = Date.now()
           },
           (error) => {
-            // 检查是否已被中止
-            if (!isStreaming.value) {
-              console.log('🛑 流式输出错误回调被跳过（已中止）')
-              return
-            }
-            console.error('❌ 流式输出错误：', error)
+            // 错误回调
+            if (requestState.value !== RequestState.STREAMING) return
+            console.error('❌ 流式输出错误:', error)
 
             const messageIndex = session.messages.findIndex((msg) => msg.id === aiMessage.id)
             if (messageIndex !== -1) {
-              session.messages[messageIndex].content = `抱歉，AI回复过程中出现错误：${error}`
-              session.updatedAt = Date.now()
+              session.messages[messageIndex].content = `抱歉,AI回复过程中出现错误: ${error}`
+              updateSessionTime(session.id)
             }
-            // ✅ 修复：在错误回调中重置所有状态
             resetRequestState()
-          },
+            window.$message?.error('AI回复失败,请重试')
+          }
         )
       } catch (error) {
-        // 检查是否已被中止
-        if (!isStreaming.value) {
-          console.log('🛑 主流程错误被跳过（已中止）')
-          return
-        }
-        console.error('💥 出现错误', error)
-        // ✅ 修复：在 catch 块中重置所有状态
+        console.error('💥 调用AI时发生错误:', error)
         resetRequestState()
-      } finally {
-        // ✅ 修复：finally 中确保状态被重置（安全网）
-        // 即使前面的回调没有正确执行，这里也能保证状态被清理
-        if (isLoading.value || isStreaming.value) {
-          console.warn('🛡️  finally 块中检测到未重置的状态，执行清理')
-          resetRequestState()
-        }
+        window.$message?.error('发送消息失败,请重试')
       }
     }
 
-    // 添加统一的状态重置函数
-    const resetRequestState = () => {
-      console.log('🔄 重置请求状态')
-      isLoading.value = false
-      isStreaming.value = false
-      streamingContent.value = ''
-      currentStreamingMessageId.value = null
-    }
-
-    // 停止流式输出
     const stopStreaming = () => {
-      console.log('🛑 执行 stopStreaming')
+      console.log('🛑 停止流式输出')
+      abortStreaming()
       resetRequestState()
+      window.$message?.info('已停止生成')
     }
 
-    // 删除会话
-    const deleteSession = (sessionId: string) => {
-      const index = sessions.value.findIndex((s) => s.id === sessionId)
-      if (index !== -1) {
-        sessions.value.splice(index, 1)
-        if (currentSessionId.value === sessionId) {
-          currentSessionId.value = sessions.value[0]?.id || null
-        }
-      }
-    }
-
-    // 重命名会话
-    const renameSession = (sessionId: string, newTitle: string) => {
-      const session = sessions.value.find((s) => s.id === sessionId)
-      if (session) {
-        session.title = newTitle.trim() || '未命名对话'
-        session.updatedAt = Date.now()
-      }
-    }
-
-    // 清空当前会话消息
+    // ========== 数据导入导出 ==========
     const clearCurrentSession = () => {
-      const session = sessions.value.find((s) => s.id === currentSessionId.value)
+      const session = currentSession.value
       if (session) {
         session.messages = []
         session.title = '新对话'
-        session.updatedAt = Date.now()
+        updateSessionTime(session.id)
       }
     }
 
-    // 导出会话数据
     const exportSession = (sessionId: string): string => {
       const session = sessions.value.find((s) => s.id === sessionId)
       return session ? JSON.stringify(session, null, 2) : ''
     }
 
-    // 导入会话数据
     const importSession = (data: string): boolean => {
       try {
         const sessionData: ChatSession = JSON.parse(data)
         if (sessionData.id && sessionData.messages) {
+          // 避免ID冲突
           if (sessions.value.some((s) => s.id === sessionData.id)) {
             sessionData.id = generateSessionId()
           }
-
           if (!sessionData.updatedAt) {
             sessionData.updatedAt = sessionData.createdAt || Date.now()
           }
-
           sessions.value.unshift(sessionData)
+          window.$message?.success('导入会话成功')
           return true
         }
       } catch (error) {
         console.error('导入会话失败:', error)
+        window.$message?.error('导入会话失败,数据格式错误')
       }
       return false
     }
@@ -369,15 +360,16 @@ export const useChatStore = defineStore(
       sessions,
       currentSessionId,
       isLoading,
-      streamingContent,
       isStreaming,
+      streamingContent,
       currentStreamingMessageId,
 
       // 计算属性
       currentMessages,
       currentSession,
+      isCurrentSessionEmpty,
 
-      // 动作
+      // 方法
       createNewSession,
       switchSession,
       sendUserMessage,
@@ -388,10 +380,10 @@ export const useChatStore = defineStore(
       exportSession,
       importSession,
       initializeSessions,
-      regenerateFromMessage, // 新增的重发方法
+      regenerateFromMessage,
     }
   },
   {
     persist: true,
-  },
+  }
 )

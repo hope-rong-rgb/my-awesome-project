@@ -4,49 +4,40 @@
     <div class="messages-area">
       <!-- 滚动到底部按钮 -->
       <transition name="fade">
-        <div v-if="!autoScrollEnabled && currentMessages.length > 0" class="scroll-to-bottom">
+        <div v-if="showScrollButton" class="scroll-to-bottom">
           <n-tooltip placement="left">
             <template #trigger>
-              <n-button circle size="small" @click="scrollToTopAndEnable" class="scroll-btn">
+              <n-button circle size="small" @click="scrollToBottom" class="scroll-btn">
                 <template #icon>
-                  <n-icon><ArrowUpIcon /></n-icon>
+                  <n-icon><ArrowDownIcon /></n-icon>
                 </template>
               </n-button>
             </template>
-            回到顶部
+            回到底部
           </n-tooltip>
         </div>
       </transition>
-      
-      <n-scrollbar ref="scrollbarRef" @scroll="handleScroll" style="height: 100%">
-        <div ref="scrollContentRef" class="messages-container reverse-layout-container">
-          <div class="scroll-anchor"></div>
+
+      <n-scrollbar ref="scrollbarRef" @scroll="handleScroll">
+        <div class="messages-container">
           <div class="messages-list">
-            <!-- 使用动态导入的消息组件 -->
-            <Suspense v-for="message in currentMessages" :key="message.id">
-              <template #default>
-                <ChatMessage
-                  :message="message"
-                  :is-streaming="isStreaming"
-                  :current-streaming-message-id="currentStreamingMessageId"
-                  :is-regenerate-disabled="isRegenerateDisabled"
-                  :show-regenerate-button="showRegenerateButton(message)"
-                  @copy="copyCode"
-                  @regenerate="handleRegenerate"
-                />
-              </template>
-              <template #fallback>
-                <div class="message-skeleton">
-                  <n-skeleton height="60px" :repeat="1" />
-                </div>
-              </template>
-            </Suspense>
+            <!-- 消息列表 -->
+            <ChatMessage
+              v-for="message in currentMessages"
+              :key="message.id"
+              :message="message"
+              :is-streaming="isStreaming && message.id === currentStreamingMessageId"
+              :is-regenerate-disabled="isLoading || isStreaming"
+              :show-regenerate-button="showRegenerateButton(message)"
+              @copy="copyCode"
+              @regenerate="handleRegenerate"
+            />
 
             <!-- 加载状态 -->
             <div v-if="isLoading && !isStreaming" class="message-item message-assistant">
               <div class="assistant-message">
                 <div class="message-avatar">
-                  <n-avatar round size="small" class="avatar-assistant"> AI </n-avatar>
+                  <n-avatar round size="small" class="avatar-assistant">AI</n-avatar>
                 </div>
                 <div class="message-content-wrapper">
                   <div class="loading-indicator">
@@ -67,11 +58,8 @@
         <n-input
           v-model:value="userInput"
           type="textarea"
-          placeholder="输入你的问题..."
-          :autosize="{
-            minRows: 1,
-            maxRows: 4,
-          }"
+          placeholder="输入你的问题... (Enter发送, Shift+Enter换行)"
+          :autosize="{ minRows: 1, maxRows: 4 }"
           @keydown="handleKeydown"
           :disabled="isStreaming"
           class="message-input"
@@ -109,206 +97,70 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted, watch, onUnmounted, computed, defineAsyncComponent } from 'vue'
+import { ref, nextTick, onMounted, watch } from 'vue'
 import { useChatStore, type Message } from '@/stores/chat'
 import { storeToRefs } from 'pinia'
-import { detectContentScene, getSceneEnhancedPrompt } from '@/utils/markdown'
-import type { NScrollbar } from 'naive-ui/es/_internal/scrollbar'
-
-// 动态导入所有依赖
-const ChatMessage = defineAsyncComponent(() => 
-  import('@/components/ChatMessage.vue')
-)
-
-const SendIcon = defineAsyncComponent(() => 
-  import('@vicons/ionicons5').then(module => module.SendOutline)
-)
-
-const StopIcon = defineAsyncComponent(() => 
-  import('@vicons/ionicons5').then(module => module.StopOutline)
-)
-
-const ArrowUpIcon = defineAsyncComponent(() => 
-  import('@vicons/ionicons5').then(module => module.ArrowUpOutline)
-)
-
-// 类型定义
-interface ScrollbarExposed {
-  containerRef: HTMLElement | null
-  scrollTo: (options: { top?: number; left?: number; behavior?: 'auto' | 'smooth' }) => void
-}
+import ChatMessage from '@/components/ChatMessage.vue'
+import { SendOutline as SendIcon, StopOutline as StopIcon, ArrowDownOutline as ArrowDownIcon } from '@vicons/ionicons5'
 
 // Store 和响应式数据
 const chatStore = useChatStore()
 const { currentMessages, isLoading, isStreaming, currentStreamingMessageId } = storeToRefs(chatStore)
 const userInput = ref('')
-const scrollbarRef = ref<InstanceType<typeof NScrollbar> & ScrollbarExposed>()
-const autoScrollEnabled = ref(true)
-const scrollContentRef = ref<HTMLElement>()
+const scrollbarRef = ref()
+const showScrollButton = ref(false)
+const isUserScrolling = ref(false)
 
-// 滚动相关函数
-const getScrollContainer = (): HTMLElement | null => {
-  if (!scrollbarRef.value) return null
-
-  try {
-    if (scrollbarRef.value.containerRef) {
-      return scrollbarRef.value.containerRef
-    }
-
-    const scrollContainers = [
-      '.n-scrollbar-container',
-      '.n-scrollbar-content-wrapper',
-      '.n-scrollbar-content',
-    ]
-
-    for (const selector of scrollContainers) {
-      const element = document.querySelector(selector) as HTMLElement
-      if (element) return element
-    }
-  } catch (error) {
-    console.warn('获取滚动容器失败:', error)
-  }
-
-  return null
-}
-
-const scrollToTop = (behavior: 'auto' | 'smooth' = 'auto') => {
+// 滚动控制
+const scrollToBottom = (smooth = true) => {
   nextTick(() => {
-    // 方法1: 优先使用 naive-ui 内置方法
-    if (scrollbarRef.value) {
-      try {
-        scrollbarRef.value.scrollTo({ top: 0, behavior })
-        return
-      } catch (error) {
-        console.warn('naive-ui 内置滚动方法失败:', error)
-      }
-    }
-
-    // 方法2: 使用容器获取方法
-    const container = getScrollContainer()
-    if (container) {
-      try {
-        container.scrollTo({ top: 0, behavior })
-        return
-      } catch (error) {
-        console.warn('容器获取方法滚动失败:', error)
-      }
-    }
-
-    // 方法3: 使用直接DOM方法
-    const possibleSelectors = [
-      '.n-scrollbar-container',
-      '.n-scrollbar-content',
-      '.messages-area',
-      '.reverse-layout-container',
-    ]
-
-    for (const selector of possibleSelectors) {
-      const element = document.querySelector(selector) as HTMLElement
-      if (element) {
-        try {
-          element.scrollTo({ top: 0, behavior })
-          return
-        } catch (error) {
-          console.warn(`滚动 ${selector} 失败:`, error)
-        }
-      }
+    const scrollbar = scrollbarRef.value
+    if (scrollbar?.scrollTo) {
+      scrollbar.scrollTo({
+        top: scrollbar.containerRef?.scrollHeight || 999999,
+        behavior: smooth ? 'smooth' : 'auto'
+      })
     }
   })
-}
-
-const scrollToTopSmooth = () => {
-  scrollToTop('smooth')
 }
 
 const handleScroll = (e: Event) => {
   const container = e.target as HTMLElement
   if (!container) return
 
-  const scrollTop = container.scrollTop
-  const distanceFromBottom = scrollTop
+  const { scrollTop, scrollHeight, clientHeight } = container
+  const distanceFromBottom = scrollHeight - scrollTop - clientHeight
   const threshold = 100
-  
-  const isNearBottom = distanceFromBottom < threshold
 
-  if (autoScrollEnabled.value !== isNearBottom) {
-    autoScrollEnabled.value = isNearBottom
+  // 用户主动滚动
+  if (distanceFromBottom > threshold) {
+    isUserScrolling.value = true
+    showScrollButton.value = true
+  } else {
+    isUserScrolling.value = false
+    showScrollButton.value = false
   }
 }
-
-const scrollToTopAndEnable = () => {
-  autoScrollEnabled.value = true
-  scrollToTopSmooth()
-}
-
-const handleAutoScroll = () => {
-  if (!autoScrollEnabled.value) return
-  scrollToTop('auto')
-}
-
-// 监听器
-const messageLength = computed(() => currentMessages.value.length)
-
-watch(messageLength, (newVal, oldVal) => {
-  if (newVal > oldVal) {
-    handleAutoScroll()
-  }
-})
-
-watch(
-  () => [chatStore.streamingContent, isStreaming.value],
-  () => {
-    if (autoScrollEnabled.value && isStreaming.value) {
-      scrollToTop('auto')
-    }
-  },
-  { deep: true },
-)
-
-watch(isLoading, (newVal) => {
-  if (autoScrollEnabled.value && newVal) {
-    handleAutoScroll()
-  }
-})
 
 // 业务逻辑
-const isRegenerateDisabled = computed(() => {
-  return isStreaming.value || isLoading.value
-})
-
 const showRegenerateButton = (message: Message) => {
-  if (message.role === 'user') {
-    const userMessages = currentMessages.value.filter((msg) => msg.role === 'user')
-    const lastUserMessage = userMessages[userMessages.length - 1]
-    return message.id === lastUserMessage?.id && !isStreaming.value && !isLoading.value
-  }
-  if (message.role === 'assistant') {
-    const lastMessage = currentMessages.value[currentMessages.value.length - 1]
-    return message.id === lastMessage?.id && !isStreaming.value && !isLoading.value
-  }
-  return false
+  if (isStreaming.value || isLoading.value) return false
+
+  const lastMessage = currentMessages.value[currentMessages.value.length - 1]
+  return message.id === lastMessage?.id
 }
 
 const handleRegenerate = (message: Message) => {
-  if (isRegenerateDisabled.value) return
+  if (isLoading.value || isStreaming.value) return
   chatStore.regenerateFromMessage(message.id)
 }
 
 const handleSend = () => {
   const trimmedInput = userInput.value.trim()
   if (!trimmedInput || isLoading.value) return
-  
-  const scene = detectContentScene(trimmedInput)
-  const enhancedInput = getSceneEnhancedPrompt(trimmedInput, scene)
-  
-  autoScrollEnabled.value = true
+
   userInput.value = ''
-  
-  console.log('🚀 发送场景化消息:', {
-    场景类型: scene,
-    增强提示: enhancedInput.substring(0, 100) + '...',
-  })
-  
+  isUserScrolling.value = false
   chatStore.sendUserMessage(trimmedInput)
 }
 
@@ -326,12 +178,6 @@ const handleKeydown = (e: KeyboardEvent) => {
 const handleStop = () => {
   console.log('🛑 停止按钮被点击')
   chatStore.stopStreaming()
-
-  nextTick(() => {
-    if (isLoading.value) {
-      chatStore.isLoading = false
-    }
-  })
 }
 
 const copyCode = async (content: string) => {
@@ -339,45 +185,41 @@ const copyCode = async (content: string) => {
     await navigator.clipboard.writeText(content)
     window.$message?.success('内容已复制到剪贴板')
   } catch (error) {
-    console.error('复制失败：', error)
+    console.error('复制失败:', error)
     window.$message?.error('复制失败')
   }
 }
 
-// 全局快捷键
-const handleGlobalKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Enter' && e.ctrlKey) {
-    e.preventDefault()
-    handleSend()
+// 监听消息变化,自动滚动
+watch(
+  () => currentMessages.value.length,
+  () => {
+    if (!isUserScrolling.value) {
+      scrollToBottom(false)
+    }
   }
-}
+)
+
+// 监听流式输出,自动滚动
+watch(
+  () => chatStore.streamingContent,
+  () => {
+    if (isStreaming.value && !isUserScrolling.value) {
+      scrollToBottom(false)
+    }
+  }
+)
 
 // 生命周期
 onMounted(() => {
   console.log('🚀 ChatArea 组件挂载')
-  
-  if (isLoading.value || isStreaming.value) {
-    console.warn('⚠️ 检测到异常加载状态，强制重置')
-    chatStore.isLoading = false
-    chatStore.isStreaming = false
-    chatStore.currentStreamingMessageId = null
-  }
-
   nextTick(() => {
-    scrollToTop('auto')
+    scrollToBottom(false)
   })
-
-  window.addEventListener('keydown', handleGlobalKeydown)
 })
 
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleGlobalKeydown)
-})
-
-// 暴露方法
 defineExpose({
-  scrollToTop,
-  getScrollContainer,
+  scrollToBottom,
 })
 </script>
 
@@ -392,17 +234,15 @@ defineExpose({
 
 .messages-area {
   flex: 1;
-  overflow-y: auto;
   position: relative;
-  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .messages-container {
   max-width: 800px;
   margin: 0 auto;
   padding: 24px;
-  min-height: 100%;
-  box-sizing: border-box;
 }
 
 .messages-list {
@@ -411,22 +251,19 @@ defineExpose({
   gap: 24px;
 }
 
-.reverse-layout-container {
-  display: flex;
-  flex-direction: column-reverse;
-  min-height: 100vh;
-  height: auto;
-  flex: 1;
+.message-item {
+  animation: fadeInUp 0.3s ease-out;
 }
 
-.scroll-anchor {
-  flex: 1 1 auto;
-  min-height: 1px;
-  height: 1px;
-}
-
-.message-skeleton {
-  padding: 12px 0;
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .loading-indicator {
@@ -448,17 +285,7 @@ defineExpose({
   background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(20px);
   border-top: 1px solid rgba(229, 231, 235, 0.8);
-  position: relative;
-}
-
-.input-area::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(229, 231, 235, 0.8), transparent);
+  flex-shrink: 0;
 }
 
 .input-container {
@@ -474,7 +301,6 @@ defineExpose({
   border: 1px solid rgba(229, 231, 235, 0.8);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   background: rgba(255, 255, 255, 0.9);
-  overflow: hidden;
 }
 
 .message-input:focus-within {
@@ -483,27 +309,10 @@ defineExpose({
   transform: translateY(-1px);
 }
 
-.message-input :deep(.n-input__textarea) {
-  border-radius: 20px;
-  padding: 16px 20px;
-  font-size: 15px;
-  line-height: 1.5;
-  resize: none;
-  border: none;
-  background: transparent;
-  font-family: inherit;
-  color: #1f2937;
-}
-
-.message-input :deep(.n-input__textarea::placeholder) {
-  color: #9ca3af;
-}
-
 .input-actions {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  align-items: center;
 }
 
 .send-btn,
@@ -514,7 +323,6 @@ defineExpose({
   padding: 0 20px;
   height: 40px;
   font-size: 14px;
-  letter-spacing: 0.02em;
 }
 
 .send-btn {
@@ -571,38 +379,21 @@ defineExpose({
   transform: translateY(10px);
 }
 
-/* 响应式设计 */
 @media (max-width: 768px) {
   .messages-container {
     padding: 16px;
   }
-  
-  .reverse-layout-container {
-    padding: 16px;
-  }
-  
+
   .input-area {
     padding: 20px 16px;
   }
-  
+
   .scroll-to-bottom {
     right: 16px;
     bottom: 100px;
   }
-  
-  .input-actions {
-    gap: 8px;
-  }
-
-  .send-btn,
-  .stop-btn {
-    padding: 0 16px;
-    height: 36px;
-    font-size: 13px;
-  }
 }
 
-/* 暗色模式支持 */
 @media (prefers-color-scheme: dark) {
   .chat-container {
     background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
@@ -612,18 +403,10 @@ defineExpose({
     background: rgba(15, 23, 42, 0.8);
     border-top-color: rgba(71, 85, 105, 0.6);
   }
-  
+
   .message-input {
     background: rgba(30, 41, 59, 0.8);
     border-color: rgba(71, 85, 105, 0.6);
-  }
-
-  .message-input :deep(.n-input__textarea) {
-    color: #f1f5f9;
-  }
-
-  .message-input :deep(.n-input__textarea::placeholder) {
-    color: #94a3b8;
   }
 
   .loading-indicator {
@@ -631,13 +414,10 @@ defineExpose({
     border-color: rgba(71, 85, 105, 0.6);
     color: #94a3b8;
   }
-  
+
   .scroll-btn {
     background: rgba(30, 41, 59, 0.9);
     border-color: rgba(71, 85, 105, 0.6);
   }
 }
-</style>
-<style>
-@import url('../styles/markdown.css');
 </style>

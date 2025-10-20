@@ -1,21 +1,26 @@
-import { create } from 'naive-ui'
-
-// 只导入实际使用的组件
+/**
+ * Naive UI 组件按需导入配置
+ */
+import type { App } from 'vue'
 import {
+  create,
   NConfigProvider,
   NLayout,
   NLayoutSider,
   NLayoutContent,
   NButton,
   NInput,
+  NScrollbar,
   NAvatar,
-  NMessageProvider,
+  NIcon,
   NSpin,
   NTooltip,
-  NIcon,
-  NScrollbar,
-  NH2, 
-  NEmpty
+  NDropdown,
+  NEmpty,
+  NH2,
+  NMessageProvider,
+  NNotificationProvider,
+  NDialogProvider,
 } from 'naive-ui'
 
 const naive = create({
@@ -26,15 +31,22 @@ const naive = create({
     NLayoutContent,
     NButton,
     NInput,
+    NScrollbar,
     NAvatar,
-    NMessageProvider,
+    NIcon,
     NSpin,
     NTooltip,
-    NIcon,
-    NScrollbar,
-    NH2, 
+    NDropdown,
     NEmpty,
-  ]
+    NH2,
+    NMessageProvider,
+    NNotificationProvider,
+    NDialogProvider,
+  ],
 })
 
-export default naive
+export default {
+  install(app: App) {
+    app.use(naive)
+  },
+}
